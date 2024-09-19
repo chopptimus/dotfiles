@@ -336,6 +336,30 @@ local function set_text(range, lines)
   a.nvim_buf_set_text(0, start_row, start_col, end_row, end_col, lines)
 end
 
+local function cleanup_whitespace()
+  vim.cmd([[silent '[,'] g/^[ \t)\]}]\+$/s/\s//g]])
+  vim.cmd([[silent '[,'] g/^[ \t)\]}]\+$/s/\s//g]])
+end
+
+---@param range integer[]
+local function linewise_delete(range)
+  -- We're looking for the deepest node that contains the entire range.
+  -- This nodes serves as the root for tree traversal.
+  local root = ts.get_node()
+  if not root then return end
+
+  while not ts.node_contains(root, range) do
+    root = root:parent()
+    if not root then return end
+  end
+
+  for n in vim.iter(vim.iter(nodes_in_range(root, range)):totable()):rev() do
+    set_text({ n:range() }, {})
+  end
+
+  cleanup_whitespace()
+end
+
 function M.delete_op(type)
   local start_row, start_col, end_row, end_col = operator_range()
   local cur_row, cur_col = end_row, end_col
@@ -345,26 +369,16 @@ function M.delete_op(type)
     start_row, start_col = cur_row, cur_col
   end
 
+  -- Deleting is inclusive
   if type == "line" then
     start_col = 0
     end_col = 0
     end_row = end_row + 1
+    linewise_delete({ start_row, start_col, end_row, end_col })
+  elseif type == "char" then
+    end_col = end_col + 1
   end
-
-  -- We're looking for the deepest node that contains the entire range.
-  -- This nodes serves as the root for tree traversal.
-  local root = ts.get_node()
-  if not root then return end
-
-  local range = { start_row, start_col, end_row, end_col }
-  while not ts.node_contains(root, range) do
-    root = root:parent()
-    if not root then return end
-  end
-
-  for n in vim.iter(vim.iter(nodes_in_range(root, range)):totable()):rev() do
-    set_text({ n:range() }, {})
-  end
+  -- block type not supported
 end
 
 function M.slurp_barf_left()
