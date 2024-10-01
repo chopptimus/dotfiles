@@ -341,44 +341,72 @@ end
 ---@param start_row integer
 ---@param end_row integer
 local function cleanup_whitespace(start_row, end_row)
-  local range_string = tostring(start_row + 1) .. "," .. tostring(end_row + 1)
+
+  local lines = a.nvim_buf_get_lines(0, start_row, end_row + 1, false)
+  for i = #lines, 1, -1 do
+    if string.match(lines[i], "^$") then
+      table.remove(lines, i)
+    end
+  end
+
+  for i = #lines, 1, -1 do
+    if string.match(lines[i], "^[ \\t(\\[{]+$") then
+      table.remove(lines, i)
+    end
+  end
+
+  -- go backwards
+  local range_string = tostring(end_row + 1) .. "," .. tostring(start_row + 1)
   vim.cmd(template([[
+    silent ${range} g//s/\(\S\)\s\+/\1/g
     silent ${range} g/^[ \t)\]}]\+$/s/\s//g
-    silent ${range} g/^[ \t(\[{]\+$/s/\(\S\)\s\+/\1/g
-    silent ${range} g/^$/d
   ]], { range = range_string } ))
+end
+
+
+local function delete_node(node)
+  set_text({ node:range() }, {})
 end
 
 ---@param start_row integer
 ---@param end_row integer
 local function linewise_delete(start_row, end_row)
-  -- We're looking for the deepest node that contains the entire range.
-  -- This nodes serves as the root for tree traversal.
   local root = ts.get_node()
   if not root then return end
 
   local range = { start_row, 0, end_row + 1, 0 }
 
+  -- We're looking for the deepest node that contains the entire range.
+  -- This nodes serves as the root for tree traversal.
   while not ts.node_contains(root, range) do
     root = root:parent()
     if not root then return end
   end
 
+  local lines = a.nvim_buf_get_lines(0, start_row, end_row, false)
+
   for n in vim.iter(vim.iter(nodes_in_range(root, range)):totable()):rev() do
-    set_text({ n:range() }, {})
+    delete_node(n)
   end
 
-  cleanup_whitespace(start_row, end_row)
+  -- cleanup_whitespace(start_row, end_row)
 end
 
 function M.delete_op(type)
   -- Deleting is inclusive
   if type == "line" then
-    local start_row = a.nvim_buf_get_mark(0, "[")[1] - 1
+    local start_row, start_col = unpack(a.nvim_buf_get_mark(0, "["))
+    start_row = start_row - 1
     local end_row = a.nvim_buf_get_mark(0, "]")[1] - 1
-    linewise_delete(math.min(start_row, end_row), math.max(start_row, end_row))
+
+    if start_row < end_row then
+      linewise_delete(start_row, end_row)
+      set_cur(start_row, start_col)
+    else
+      linewise_delete(end_row, start_row)
+      set_cur(end_row, start_col)
+    end
   elseif type == "char" then
-    -- end_col = end_col + 1
   end
   -- block type not supported
 end
